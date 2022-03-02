@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Image Service Collab checker</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            .wide{
+                width: 90%;
+            }
+        </style>
+        <script>
+            function clear(){
+                document.getElementById("log").value="";
+            }
+            function log(message){
+                document.getElementById("log").value+=message+"\n";
+            }
+            async function start(){
+                clear();
+                let token=document.getElementById("token").value.trim();
+                try{
+                    token=JSON.parse(token).access_token;
+                }catch(ex){}
+                let slug=document.getElementById("link").value.trim();
+                if(slug.endsWith("/Bucket"))
+                    slug=slug.substr(0,slug.length-7);
+                slug=slug.split("/");
+                slug=slug[slug.length-1];
+                let objs=(await fetch(`bucket.php?${slug}/stat&${token}`).then(response=>response.json())).objects_count;
+                log(`${objs} objects found in ${slug}.`);
+                log("");
+                let dir=await fetch("bucket.php?"+slug+"&"+token).then(response=>response.json());
+                let extras=[];
+                let pyramids=0;
+                let tiles=0;
+                for(let object of dir.objects)
+                    if(!object.hasOwnProperty("subdir"))
+                        extras.push(object.name);
+                else{
+                    let name=object.subdir;
+                    name+=name.substr(0,name.lastIndexOf("."))+".dzi";
+                    let dzi=await fetch(`bucket.php?${slug}/${name}/raw&${token}`).then(response=>response.text());
+                    let tilesize=parseInt(dzi.match(/TileSize="(\d+)"/m)[1]);
+                    let width=parseInt(dzi.match(/Width="(\d+)"/m)[1]);
+                    let height=parseInt(dzi.match(/Height="(\d+)"/m)[1]);
+                    let wh=`${width}x${height}`;
+//                    log(`${width}x${height},${tilesize}`);
+                    pyramids++;
+                    let pretiles=tiles;
+                    tiles++; // 1x1
+//                    pure++;
+                    let top=true;
+                    while(width>1 || height>1){
+//                        let levelstart=tiles;
+//                        pure+=Math.ceil(width/tilesize)*Math.ceil(height/tilesize);
+                        let w=false,h=false;
+                        if(top){
+                            if(width%tilesize===0){
+                                width++;
+                                w=true;
+                            }
+                            if(height%tilesize===0){
+                                height++;
+                                h=true;
+                            }
+                            top=false;
+                        }
+                        tiles+=Math.ceil(width/tilesize)*Math.ceil(height/tilesize);
+                        if(w)width--;
+                        if(h)height--;
+                        width=Math.ceil(width/2);
+                        height=Math.ceil(height/2);
+//                        log(`${dzi[0]} ${tiles-levelstart}`);
+                    }
+                    log(`${pyramids}. ${name} ${wh}, ${tilesize}, ${tiles-pretiles} tiles calculated, +1 DZI descriptor.`);
+                }
+                let calculated=pyramids+tiles+extras.length;
+                log("");
+                if(objs===calculated)
+                    log(`${calculated} objects expected, ${objs} objects found, ingestion seems to be correct.`);
+                else
+                    log(`${calculated} objects expected, ${objs} objects found, ingestion may have failed.`);
+                log("");
+                if(extras.length){
+                    log(`Non-pyramid files: ${extras.length}`);
+                    for(let extra of extras)
+                        log(extra);
+                }
+                return;
+                    
+//                if(!source.endsWith(".tif")){
+//                    log(`"${source}" does not ends with .tif, this utility works with .tifs only`);
+//                    return;
+//                }
+//                log(`Analyzing "${source}"`);
+//                source=source.match(/(https:\/\/object.cscs.ch\/v1\/AUTH_[^\/]+\/[^\/]+)\/(.+\/)[^\/]+.tif/);
+//                let container=source[1];
+//                let prefix=source[2];
+//                log(`Container: ${container}`);
+//                log(`Prefix: ${prefix}`);
+//                let kglist=`${container}?prefix=${prefix}&format=text`;
+//                log(`Attempting to get list as ${kglist}`);
+//                let list=await fetch(`kglist.php?${kglist}`).then(result=>result.text());
+//                let tiffs=new Set();
+//                for(let line of list.split("\n"))
+//                    if(line.endsWith(".tif")){
+//                        let tiff=line.substring(prefix.length);
+//                        if(tiffs.has(tiff)){
+//                            log(`Duplicate entry found: ${tiff}, something is wrong.`);
+//                            return;
+//                        }
+//                        tiffs.add(tiff);
+//                    }
+//                log(`${tiffs.size} images found.`);
+//                log("Checking image service container");
+//                let bucket=`https://object.cscs.ch/v1/AUTH_08c08f9f119744cbbf77e216988da3eb/${document.getElementById("imageservice").value}`;
+//                if(!bucket.endsWith("/"))
+//                    bucket+="/";
+//                let bucketlist=await fetch(`${bucket}?delimiter=/&format=text`).then(result=>result.text());
+//                let extras=0;
+//                let count=0;
+//                for(let line of bucketlist.split("\n"))
+//                    if(line.length>0){
+//                        if(line.endsWith("/"))
+//                            line=line.substring(0,line.length-1);
+//                        if(tiffs.has(line))
+//                            count++;
+//                        else{
+//                            extras++;
+//                            log(`Extra file: ${line}`);
+//                        }
+//                    }
+//                if(count!==tiffs.size){
+//                    log(`Only ${count} matching files (out of ${tiffs.size}) and ${extras} extra files found.`);
+//                    return;
+//                }
+//                if(extras>2){
+//                    log(`Unexpected amount of extra files (${extras}) found.`);
+//                    log("Please check if this dataset and this container really form a pair.");
+//                    return;
+//                }
+////                let count=await fetch(bucket,{method:"HEAD"}).then(x=>{for(let y of x.headers.entries())log(y)});
+//                        //.then(result=>result.headers.get("X-Container-Object-Count"));
+//                count=await fetch(`buckethead.php?${bucket}`).then(result=>result.text());
+//                count=parseInt(count.match(/X-Container-Object-Count: (\d+)/m)[1]);
+//                log(`Container contains ${count} files (${extras} extra(s) included).`);
+//                log("Collecting DZI descriptors");
+//                let dzis=[];
+//                let errors=0;
+//                let hack=document.getElementById("log");
+//                let base=hack.value;
+//                for(let tif of tiffs){
+//                    hack.value=base;
+//                    log(`${tiffs.size-dzis.length} / ${tif}`);
+//                    let name=tif.substring(0,tif.length-3);
+//                    dzis.push([name,await fetch(`${bucket+tif}/${name}dzi`).then(result=>result.text()).catch(fail=>{errors++;log(fail);base=hack.value;})]);
+//                }
+//                hack.value=base;
+//                if(errors>0){
+//                    log(`${errors} error(s) found.`);
+//                    return;
+//                }
+//                log("DZI descriptors successfully downloaded.");
+//                let tiles=0;
+//                let pure=0;
+//                let idx=0;
+//                for(let dzi of dzis){
+//                    let tilesize=parseInt(dzi[1].match(/TileSize="(\d+)"/m)[1]);
+//                    let width=parseInt(dzi[1].match(/Width="(\d+)"/m)[1]);
+//                    let height=parseInt(dzi[1].match(/Height="(\d+)"/m)[1]);
+////                    log(`${width}x${height},${tilesize}`);
+//                    let pretiles=tiles;
+//                    tiles++;
+//                    pure++;
+//                    let top=true;
+//                    while(width>1 || height>1){
+//                        let levelstart=tiles;
+//                        pure+=Math.ceil(width/tilesize)*Math.ceil(height/tilesize);
+//                        let w=false,h=false;
+//                        if(top){
+//                            if(width%tilesize===0){
+//                                width++;
+//                                w=true;
+//                            }
+//                            if(height%tilesize===0){
+//                                height++;
+//                                h=true;
+//                            }
+//                            top=false;
+//                        }
+//                        tiles+=Math.ceil(width/tilesize)*Math.ceil(height/tilesize);
+//                        if(w)width--;
+//                        if(h)height--;
+//                        width=Math.ceil(width/2);
+//                        height=Math.ceil(height/2);
+//                        log(`${dzi[0]} ${tiles-levelstart}`);
+//                    }
+//                    log(`${dzi[0]} ${tiles-pretiles}`);
+//                }
+//                let files=tiles+extras+tiffs.size;
+//                let purefiles=pure+extras+tiffs.size;
+//                log(`${tiffs.size} DZI descriptors`);
+//                log(`${extras} extra files`);
+//                if(files===count){
+//                    log(`${tiles} tiles calculated`);
+//                    log(`${files} files are expected, ${count} are present.`);
+//                    log(`Ingestion seems to be be successful.`);
+//                    if(pure!==tiles)
+//                        log("Series has extra files due to a PyramidIO bug.");
+//                } else if(purefiles===count) {
+//                    log(`${pure} tiles calculated`);
+//                    log(`${purefiles} files are expected, ${count} are present.`);
+//                    log(`Upload seems to be successful.`);
+//                } else if(pure===tiles) {
+//                    log(`${tiles} tiles are calculated.`);
+//                    log(`${files} files are expected, ${count} are present.`);
+//                    log(`${files-count} files missing, ingestion may have failed.`);
+//                } else {
+//                    log(`${tiles} or ${pure} tiles are calculated with or without PyramidIO bug.`);
+//                    log(`${files} or ${purefiles} files are expected, ${count} are present.`);
+//                    log("Ingestion or upload may have failed.");
+//                }
+            }
+        </script>
+    </head>
+    <body>
+        <input id="token" placeholder="Token from Nexus">
+        <a href="https://nexus-iam.humanbrainproject.org/v0/oauth2/authorize" target="_blank">Nexus</a><br>
+        <input id="link" placeholder="Collab or Data Proxy link, or just the slug" class="wide"><br>
+        <button onclick="start()">Go</button>
+        <hr>
+        <textarea id="log" rows="25" class="wide"></textarea>
+    </body>
+</html>
