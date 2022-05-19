@@ -22,15 +22,47 @@
                 try{
                     token=JSON.parse(token).access_token;
                 }catch(ex){}
+                
+                let source=document.getElementById("org").value;
+                if(!source.endsWith(".tif")){
+                    log(`"${source}" does not ends with .tif, this utility works with .tifs only`);
+                    return;
+                }
+                log(`Analyzing "${source}"`);
+                let tiffs=new Set();
+                if(source.startsWith("https:\/\/object.cscs.ch\/v1\/AUTH_")){
+                    source=source.match(/(https:\/\/object.cscs.ch\/v1\/AUTH_[^\/]+\/[^\/]+)\/(.+\/)[^\/]+.tif/);
+                    let container=source[1];
+                    let prefix=source[2];
+                    log(`Container: ${container}`);
+                    log(`Prefix: ${prefix}`);
+                    let kglist=`${container}?prefix=${prefix}&format=text`;
+                    log(`Attempting to get list as ${kglist}`);
+                    let list=await fetch(`prox.php?${token}&${kglist}`).then(result=>result.text());
+                    for(let line of list.split("\n"))
+                        if(line.endsWith(".tif")){
+                            let tiff=line.substring(prefix.length);
+                            if(tiffs.has(tiff)){
+                                log(`Duplicate entry found: ${tiff}, something is wrong.`);
+                                return;
+                            }
+                            tiffs.add(tiff);
+                        }
+                    log(`${tiffs.size} images found.`);
+                }else{
+                    log("Data-Proxy source is yet to be implemented.");
+                    return;
+                }
+
                 let slug=document.getElementById("link").value.trim();
                 if(slug.endsWith("/Bucket"))
                     slug=slug.substr(0,slug.length-7);
                 slug=slug.split("/");
                 slug=slug[slug.length-1];
-                let objs=(await fetch(`bucket.php?${slug}/stat&${token}`).then(response=>response.json())).objects_count;
+                let objs=(await fetch(`prox.php?${token}&https://data-proxy.ebrains.eu/api/v1/public/buckets/${slug}/stat`).then(response=>response.json())).objects_count;
                 log(`${objs} objects found in ${slug}.`);
                 log("");
-                let dir=await fetch("bucket.php?"+slug+"&"+token).then(response=>response.json());
+                let dir=await fetch(`prox.php?${token}&https://data-proxy.ebrains.eu/api/v1/public/buckets/${slug}?delimiter=/&limit=9999`).then(response=>response.json());
                 let extras=[];
                 let pyramids=0;
                 let tiles=0;
@@ -39,8 +71,15 @@
                         extras.push(object.name);
                 else{
                     let name=object.subdir;
-                    name+=name.substr(0,name.lastIndexOf("."))+".dzi";
-                    let dzi=await fetch(`bucket.php?${slug}/${name}/raw&${token}`).then(response=>response.text());
+                    name=name.substr(0,name.length-1);
+                    if(tiffs.has(name)){
+                        tiffs.delete(name);
+                    }else{
+                        log(`Unknown image found: ${name}`);
+                        return;
+                    }
+                    name+="/"+name.substr(0,name.lastIndexOf("."))+".dzi";
+                    let dzi=await fetch(`prox.php?${token}&https://data-proxy.ebrains.eu/api/v1/public/buckets/${slug}/${name}`).then(response=>response.text());
                     let tilesize=parseInt(dzi.match(/TileSize="(\d+)"/m)[1]);
                     let width=parseInt(dzi.match(/Width="(\d+)"/m)[1]);
                     let height=parseInt(dzi.match(/Height="(\d+)"/m)[1]);
@@ -74,6 +113,11 @@
 //                        log(`${dzi[0]} ${tiles-levelstart}`);
                     }
                     log(`${pyramids}. ${name} ${wh}, ${tilesize}, ${tiles-pretiles} tiles calculated, +1 DZI descriptor.`);
+                }
+                if(tiffs.size>0){
+                    log("Missing pyramids for "+[...tiffs].join(" "));
+                    log("Ingestion bucket and source data do not match.");
+                    return;
                 }
                 let calculated=pyramids+tiles+extras.length;
                 log("");
@@ -225,11 +269,10 @@
         </script>
     </head>
     <body>
-        For checking images on CSCS against a public Collab Bucket <a href="cscs-publicbucket.html">follow this link</a><hr>
-        This page checks if a bucket is consistent in itself<br>
-        <input id="token" placeholder="Token from Nexus">
-        <a href="https://nexus-iam.humanbrainproject.org/v0/oauth2/authorize" target="_blank">Nexus</a><br>
-        <input id="link" placeholder="Collab or Data Proxy link, or just the slug" class="wide"><br>
+        <input id="token" placeholder="Token from Nexus" hidden value="a">
+        <!--<a href="https://nexus-iam.humanbrainproject.org/v0/oauth2/authorize" target="_blank">Nexus</a><br>-->
+        <input id="org" placeholder="Sample image link" class="wide" value="https://object.cscs.ch/v1/AUTH_4791e0a3b3de43e2840fe46d9dc2b334/ext-d000020_D1-M-P70_pub/C12/D1R_P70_M_C12_s001.tif"><br>
+        <input id="link" placeholder="Pyramid bucket (Collab link, Data Proxy link, or just the slug)" class="wide" value="img-346808ac-46fb-11ec-98bf-50eb718d929d"><br>
         <button onclick="start()">Go</button>
         <hr>
         <textarea id="log" rows="25" class="wide"></textarea>
